@@ -50,6 +50,27 @@
       </div>
     </div>
 
+    <!-- Monthly Spending Chart -->
+    <div class="card chart-section">
+      <h2>📈 Evoluție lunară</h2>
+      <div v-if="expenses.length === 0" class="empty-state">
+        Adaugă cheltuieli pentru a vedea graficul!
+      </div>
+      <div v-else>
+        <canvas ref="monthlyChart" class="chart-canvas"></canvas>
+        <div class="month-comparison" v-if="monthlyComparison">
+          <div class="comparison-card" :class="monthlyComparison.trend">
+            <div class="comparison-label">Față de luna trecută</div>
+            <div class="comparison-value">
+              <span class="comparison-icon">{{ monthlyComparison.icon }}</span>
+              {{ monthlyComparison.percentage }}%
+              <span class="comparison-text">{{ monthlyComparison.text }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Savings Goals -->
     <div class="card savings">
       <h2>🎯 Pune deoparte</h2>
@@ -150,13 +171,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { Chart, registerables } from 'chart.js'
+
+// Register Chart.js components
+Chart.register(...registerables)
 
 // State
 const expenses = ref([])
 const savingsGoals = ref([])
 const showSavingsForm = ref(false)
 const expandedGroups = ref({})
+const monthlyChart = ref(null)
+let chartInstance = null
 
 const newExpense = ref({
   description: '',
@@ -180,7 +207,110 @@ onMounted(() => {
   if (savedGoals) {
     savingsGoals.value = JSON.parse(savedGoals)
   }
+
+  // Create chart after data is loaded
+  nextTick(() => {
+    createChart()
+  })
 })
+
+// Watch for changes in expenses to update chart
+watch(() => expenses.value.length, () => {
+  nextTick(() => {
+    updateChart()
+  })
+})
+
+// Create the monthly chart
+function createChart() {
+  if (!monthlyChart.value) return
+
+  const ctx = monthlyChart.value.getContext('2d')
+
+  // Destroy existing chart if it exists
+  if (chartInstance) {
+    chartInstance.destroy()
+  }
+
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: monthlyData.value.map(m => m.label),
+      datasets: [{
+        label: 'Cheltuieli (lei)',
+        data: monthlyData.value.map(m => m.total),
+        backgroundColor: 'rgba(102, 126, 234, 0.8)',
+        borderColor: 'rgba(102, 126, 234, 1)',
+        borderWidth: 2,
+        borderRadius: 8,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 2,
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          padding: 12,
+          titleFont: {
+            size: 14,
+            weight: 'bold'
+          },
+          bodyFont: {
+            size: 13
+          },
+          callbacks: {
+            label: function(context) {
+              return context.parsed.y.toFixed(2) + ' lei'
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(value) {
+              return value + ' lei'
+            },
+            font: {
+              size: 11
+            }
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.05)'
+          }
+        },
+        x: {
+          ticks: {
+            font: {
+              size: 11
+            }
+          },
+          grid: {
+            display: false
+          }
+        }
+      }
+    }
+  })
+}
+
+// Update chart data
+function updateChart() {
+  if (!chartInstance) {
+    createChart()
+    return
+  }
+
+  chartInstance.data.labels = monthlyData.value.map(m => m.label)
+  chartInstance.data.datasets[0].data = monthlyData.value.map(m => m.total)
+  chartInstance.update()
+}
 
 // Computed
 const todayExpenses = computed(() => {
@@ -244,6 +374,76 @@ const groupedExpenses = computed(() => {
       transactions: group.transactions.sort((a, b) => new Date(b.date) - new Date(a.date))
     }))
     .sort((a, b) => b.total - a.total)
+})
+
+// Calculate monthly expenses for the last 6 months
+const monthlyData = computed(() => {
+  const months = []
+  const now = new Date()
+
+  // Get last 6 months
+  for (let i = 5; i >= 0; i--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+
+    months.push({
+      key: monthKey,
+      label: date.toLocaleDateString('ro-RO', { month: 'short', year: 'numeric' }),
+      total: 0
+    })
+  }
+
+  // Calculate totals for each month
+  expenses.value.forEach(expense => {
+    const expenseDate = new Date(expense.date)
+    const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`
+
+    const monthData = months.find(m => m.key === monthKey)
+    if (monthData) {
+      monthData.total += expense.amount
+    }
+  })
+
+  return months
+})
+
+// Calculate comparison with previous month
+const monthlyComparison = computed(() => {
+  if (monthlyData.value.length < 2) return null
+
+  const currentMonth = monthlyData.value[monthlyData.value.length - 1]
+  const previousMonth = monthlyData.value[monthlyData.value.length - 2]
+
+  if (previousMonth.total === 0) return null
+
+  const difference = currentMonth.total - previousMonth.total
+  const percentage = Math.abs((difference / previousMonth.total) * 100).toFixed(1)
+
+  if (difference > 0) {
+    return {
+      trend: 'increase',
+      icon: '📈',
+      percentage: percentage,
+      text: 'mai mult',
+      amount: difference.toFixed(2)
+    }
+  } else if (difference < 0) {
+    return {
+      trend: 'decrease',
+      icon: '📉',
+      percentage: percentage,
+      text: 'mai puțin',
+      amount: Math.abs(difference).toFixed(2)
+    }
+  } else {
+    return {
+      trend: 'same',
+      icon: '➖',
+      percentage: '0',
+      text: 'la fel',
+      amount: '0'
+    }
+  }
 })
 
 // Methods
@@ -446,6 +646,78 @@ function toggleGroup(groupName) {
   font-size: 1.8rem;
   font-weight: bold;
   color: #667eea;
+}
+
+/* Monthly Chart Section */
+.chart-section {
+  margin-bottom: 1rem;
+}
+
+.chart-canvas {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.month-comparison {
+  margin-top: 1.5rem;
+}
+
+.comparison-card {
+  padding: 1rem;
+  border-radius: 12px;
+  text-align: center;
+  background: #f8f9fa;
+}
+
+.comparison-card.increase {
+  background: linear-gradient(135deg, #ffe0e0 0%, #ffcccb 100%);
+}
+
+.comparison-card.decrease {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+}
+
+.comparison-card.same {
+  background: #f8f9fa;
+}
+
+.comparison-label {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.comparison-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.comparison-card.increase .comparison-value {
+  color: #dc3545;
+}
+
+.comparison-card.decrease .comparison-value {
+  color: #28a745;
+}
+
+.comparison-card.same .comparison-value {
+  color: #6c757d;
+}
+
+.comparison-icon {
+  font-size: 1.8rem;
+}
+
+.comparison-text {
+  font-size: 1rem;
+  font-weight: 500;
+  margin-left: 0.25rem;
 }
 
 /* Savings */
