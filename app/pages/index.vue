@@ -97,6 +97,39 @@
       </form>
     </div>
 
+    <!-- Spending Analysis - Unde se duc banii -->
+    <div class="card spending-analysis">
+      <h2>📊 Unde se duc banii</h2>
+      <div v-if="groupedExpenses.length === 0" class="empty-state">
+        Nicio cheltuială încă. Începe să urmărești banii!
+      </div>
+      <div v-else>
+        <div v-for="group in groupedExpenses" :key="group.name" class="grouped-item">
+          <div class="group-header" @click="toggleGroup(group.name)">
+            <div class="group-main">
+              <div class="group-icon">{{ getCategoryIcon(group.category) }}</div>
+              <div class="group-info">
+                <div class="group-name">{{ group.name }}</div>
+                <div class="group-stats">
+                  {{ group.count }}x cumpărat • Total: {{ group.total.toFixed(2) }} lei
+                </div>
+              </div>
+            </div>
+            <div class="group-toggle">
+              {{ expandedGroups[group.name] ? '▼' : '▶' }}
+            </div>
+          </div>
+
+          <div v-if="expandedGroups[group.name]" class="group-details">
+            <div v-for="transaction in group.transactions" :key="transaction.id" class="transaction-item">
+              <div class="transaction-date">{{ formatDate(transaction.date) }}</div>
+              <div class="transaction-amount">{{ transaction.amount }} lei</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Recent Expenses -->
     <div class="card expenses-list">
       <h2>📝 Cheltuieli recente</h2>
@@ -123,6 +156,7 @@ import { ref, computed, onMounted } from 'vue'
 const expenses = ref([])
 const savingsGoals = ref([])
 const showSavingsForm = ref(false)
+const expandedGroups = ref({})
 
 const newExpense = ref({
   description: '',
@@ -175,6 +209,41 @@ const recentExpenses = computed(() => {
   return [...expenses.value]
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 10)
+})
+
+const groupedExpenses = computed(() => {
+  // Group expenses by description (case-insensitive)
+  const groups = {}
+
+  expenses.value.forEach(expense => {
+    const key = expense.description.toLowerCase().trim()
+
+    if (!groups[key]) {
+      groups[key] = {
+        name: expense.description,
+        category: expense.category,
+        total: 0,
+        count: 0,
+        transactions: []
+      }
+    }
+
+    groups[key].total += expense.amount
+    groups[key].count += 1
+    groups[key].transactions.push({
+      id: expense.id,
+      date: expense.date,
+      amount: expense.amount
+    })
+  })
+
+  // Convert to array and sort by total spent (descending)
+  return Object.values(groups)
+    .map(group => ({
+      ...group,
+      transactions: group.transactions.sort((a, b) => new Date(b.date) - new Date(a.date))
+    }))
+    .sort((a, b) => b.total - a.total)
 })
 
 // Methods
@@ -252,6 +321,10 @@ function formatDate(dateString) {
   } else {
     return date.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })
   }
+}
+
+function toggleGroup(groupName) {
+  expandedGroups.value[groupName] = !expandedGroups.value[groupName]
 }
 </script>
 
@@ -510,6 +583,97 @@ function formatDate(dateString) {
   background: #cc0000;
 }
 
+/* Spending Analysis - Grouped Expenses */
+.spending-analysis {
+  margin-bottom: 1rem;
+}
+
+.grouped-item {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 1rem 0;
+}
+
+.grouped-item:last-child {
+  border-bottom: none;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.group-header:hover {
+  background-color: #f8f9fa;
+}
+
+.group-main {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.group-icon {
+  font-size: 1.5rem;
+}
+
+.group-info {
+  flex: 1;
+}
+
+.group-name {
+  font-weight: 600;
+  color: #333;
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.group-stats {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.group-toggle {
+  color: #667eea;
+  font-size: 1.2rem;
+  font-weight: bold;
+  padding: 0.5rem;
+}
+
+.group-details {
+  margin-top: 0.75rem;
+  margin-left: 3.5rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.transaction-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.transaction-item:last-child {
+  border-bottom: none;
+}
+
+.transaction-date {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.transaction-amount {
+  color: #667eea;
+  font-weight: 600;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 640px) {
   .summary-grid {
@@ -518,6 +682,10 @@ function formatDate(dateString) {
 
   .input-group {
     grid-template-columns: 1fr;
+  }
+
+  .group-details {
+    margin-left: 1rem;
   }
 }
 </style>
